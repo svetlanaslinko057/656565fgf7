@@ -9,14 +9,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API } from '@/App';
 import axios from 'axios';
-import { Users, Key, FileText, Activity, ShieldAlert, RefreshCw } from 'lucide-react';
+import { Users, Key, FileText, Activity, ShieldAlert, RefreshCw, CreditCard } from 'lucide-react';
 import AdminIntegrationsPage from './AdminIntegrationsPage';
+import AdminPaymentsPage from './AdminPaymentsPage';
 import AdminTemplatesPage from './AdminTemplatesPage';
 import AdminSystemUsers from './AdminSystemUsers';
 import AdminMarketplaceQuality from './AdminMarketplaceQuality';
 
 const TABS = [
   { k: 'users',        l: 'Users',             icon: <Users className="w-4 h-4" /> },
+  { k: 'payments',     l: 'Payments',          icon: <CreditCard className="w-4 h-4" /> },
   { k: 'integrations', l: 'Integrations',      icon: <Key className="w-4 h-4" /> },
   { k: 'templates',    l: 'Templates',         icon: <FileText className="w-4 h-4" /> },
   { k: 'marketplace',  l: 'Marketplace QA',    icon: <ShieldAlert className="w-4 h-4" /> },
@@ -78,6 +80,7 @@ export default function AdminV2System() {
       </div>
 
       {tab === 'users' && <AdminSystemUsers />}
+      {tab === 'payments' && <div data-testid="system-payments-embed"><AdminPaymentsPage /></div>}
       {tab === 'integrations' && <div data-testid="system-integrations-embed"><AdminIntegrationsPage /></div>}
       {tab === 'templates' && <div data-testid="system-templates-embed"><AdminTemplatesPage /></div>}
       {tab === 'marketplace' && <div data-testid="system-marketplace-embed"><AdminMarketplaceQuality /></div>}

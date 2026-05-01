@@ -35,6 +35,7 @@ import TesterValidation from "@/pages/TesterValidation";
 import ClientDeliverable from "@/pages/ClientDeliverable";
 import AdminDeliverableBuilder from "@/pages/AdminDeliverableBuilder";
 import AdminIntegrationsPage from "@/pages/AdminIntegrationsPage";
+import AdminPaymentsPage from "@/pages/AdminPaymentsPage";
 import ClientDeliverablePage from "@/pages/ClientDeliverablePage";
 import ClientVersionsPage from "@/pages/ClientVersionsPage";
 
@@ -350,6 +351,7 @@ function AppRouter() {
         <Route path="finance" element={<AdminV2Finance />} />
         <Route path="team" element={<AdminV2Team />} />
         <Route path="system" element={<AdminV2System />} />
+        <Route path="payments" element={<AdminPaymentsPage />} />
         <Route path="profile" element={<AdminV2Profile />} />
 
         {/* LEGACY REDIRECTS → canonical zones (no 404, keeps deep-links alive) */}

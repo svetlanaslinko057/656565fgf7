@@ -23035,6 +23035,22 @@ async def stripe_status(session_id: str, request: Request):
         "invoice_id": invoice_id,
     }
 
+
+@fastapi_app.get("/api/admin/payments/transactions")
+async def admin_payment_transactions(
+    limit: int = 50,
+    admin: User = Depends(require_role("admin")),
+):
+    """Last N rows from payment_transactions for the admin Payments page."""
+    cursor = db.payment_transactions.find(
+        {}, {"_id": 0}
+    ).sort("created_at", -1).limit(min(max(int(limit), 1), 200))
+    items = []
+    async for row in cursor:
+        items.append(row)
+    return {"items": items, "count": len(items)}
+
+
 # Block 10.0 — Developer Work Hub (aggregator for /dev/work)
 import dev_work as _dev_work  # noqa: E402
 _dw_router = _dev_work.init_router(db, get_current_user)
