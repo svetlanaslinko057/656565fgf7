@@ -1,47 +1,41 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect } from 'react';
 
-const ThemeContext = createContext(null);
+/**
+ * ThemeContext — locked to DARK to match the mobile app exactly.
+ *
+ * The platform's design system lives in `/app/frontend/src/theme.ts` (mobile)
+ * and is mirrored 1:1 in `index.css` `.dark` block. Light mode is intentionally
+ * disabled here: admin/web/mobile must look the same so users don't context-shift.
+ */
+const ThemeContext = createContext({
+  theme: 'dark',
+  toggleTheme: () => {},
+  setLightTheme: () => {},
+  setDarkTheme: () => {},
+});
 
-export const useTheme = () => {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error('useTheme must be used within ThemeProvider');
-  }
-  return context;
-};
+export const useTheme = () => useContext(ThemeContext);
 
 export const ThemeProvider = ({ children }) => {
-  const [theme, setTheme] = useState(() => {
-    // Check localStorage first
-    const stored = localStorage.getItem('atlas-theme');
-    if (stored) return stored;
-    
-    // Default to dark theme (original behavior)
-    return 'dark';
-  });
-
   useEffect(() => {
     const root = document.documentElement;
-    
-    // Remove both classes first
-    root.classList.remove('light', 'dark');
-    
-    // Add the current theme class
-    root.classList.add(theme);
-    
-    // Save to localStorage
-    localStorage.setItem('atlas-theme', theme);
-  }, [theme]);
+    root.classList.remove('light');
+    root.classList.add('dark');
+    // Wipe any stale "light" preference left over from earlier builds
+    try { localStorage.setItem('atlas-theme', 'dark'); } catch (_e) { /* ignore */ }
+  }, []);
 
-  const toggleTheme = () => {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-  };
-
-  const setLightTheme = () => setTheme('light');
-  const setDarkTheme = () => setTheme('dark');
-
+  // No-op setters — kept for backward compatibility with components
+  // that still call toggleTheme(). They can no longer flip to light.
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setLightTheme, setDarkTheme }}>
+    <ThemeContext.Provider
+      value={{
+        theme: 'dark',
+        toggleTheme: () => {},
+        setLightTheme: () => {},
+        setDarkTheme: () => {},
+      }}
+    >
       {children}
     </ThemeContext.Provider>
   );

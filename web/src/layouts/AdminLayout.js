@@ -2,7 +2,6 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/App';
 import { ConnectionStatusBadge } from '@/components/ConnectionStatus';
 import NotificationBell from '@/components/NotificationBell';
-import ThemeToggle from '@/components/ThemeToggle';
 import {
   LayoutDashboard,
   GitBranch,
@@ -46,7 +45,6 @@ const AdminLayout = () => {
           <div className="mt-2 flex items-center gap-2">
             <ConnectionStatusBadge />
             <NotificationBell />
-            <ThemeToggle />
           </div>
         </div>
 

@@ -130,48 +130,54 @@
    Identical hierarchy, contrasting colors
    ============================================ */
 
-/* DARK THEME (default) */
-.dark {
-  --background: 220 14% 6%;
-  --foreground: 210 20% 96%;
-  --card: 220 14% 8%;
-  --card-foreground: 210 20% 96%;
-  --popover: 220 14% 8%;
-  --popover-foreground: 210 20% 96%;
-  --muted: 220 12% 14%;
-  --muted-foreground: 215 14% 70%;
-  --border: 220 10% 18%;
-  --input: 220 10% 18%;
-  --ring: 158 78% 54%;
+/* DARK THEME (default + only — matches mobile app exactly)
+   Mobile tokens (src/theme.ts):
+     bg=#0B0F14  surface1=#0F141B  surface2=#121A23  surface3=#16202B
+     text=#E6EDF3  textSecondary=#9FB0C0  textMuted=#6B7C8F
+     primary=#2FE6A6 info=#4DA3FF risk=#F5C451 danger=#FF6B6B
+*/
+.dark, :root {
+  --background: 213 28% 6%;             /* #0B0F14 */
+  --foreground: 210 25% 93%;            /* #E6EDF3 */
+  --card: 213 31% 8%;                   /* #0F141B */
+  --card-foreground: 210 25% 93%;
+  --popover: 212 32% 11%;               /* #121A23 */
+  --popover-foreground: 210 25% 93%;
+  --muted: 212 32% 11%;                 /* surface2 — used for inputs, chips */
+  --muted-foreground: 210 19% 69%;      /* #9FB0C0 — readable secondary text */
+  --border: 210 16% 18%;                /* slightly stronger than mobile (.10) for web visibility */
+  --input: 212 32% 11%;
+  --ring: 157 78% 54%;                  /* #2FE6A6 */
 
-  --primary: 158 78% 54%;
-  --primary-foreground: 220 14% 6%;
-  --secondary: 220 12% 14%;
-  --secondary-foreground: 210 20% 96%;
-  --accent: 158 35% 16%;
-  --accent-foreground: 210 20% 96%;
+  --primary: 157 78% 54%;               /* #2FE6A6 */
+  --primary-foreground: 213 28% 6%;
+  --secondary: 212 32% 11%;
+  --secondary-foreground: 210 25% 93%;
+  --accent: 157 78% 54%;
+  --accent-foreground: 213 28% 6%;
 
-  --destructive: 0 72% 52%;
-  --destructive-foreground: 210 20% 96%;
+  --destructive: 0 100% 71%;            /* #FF6B6B */
+  --destructive-foreground: 213 28% 6%;
 
-  --trust: 158 78% 54%;
+  --trust: 157 78% 54%;
   --trust-2: 186 65% 42%;
-  --risk: 38 92% 55%;
-  --warning: 38 92% 55%;
-  --success: 158 78% 54%;
-  --info: 204 80% 55%;
+  --risk: 43 88% 64%;                   /* #F5C451 */
+  --warning: 43 88% 64%;
+  --success: 157 78% 54%;
+  --info: 212 100% 65%;                 /* #4DA3FF */
 
-  --surface-1: 220 14% 8%;
-  --surface-2: 220 12% 10%;
-  --surface-3: 220 10% 12%;
-  
+  --surface-1: 213 31% 8%;
+  --surface-2: 212 32% 11%;
+  --surface-3: 212 33% 13%;
+
   /* Font families (CSS variables) */
   --font-display: 'Space Grotesk', sans-serif;
   --font-body: 'IBM Plex Sans', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
 }
 
-/* LIGHT THEME (contrasting mirror) */
+/* LIGHT THEME — kept as fallback but NEVER auto-applied for admin.
+   The ThemeProvider forces .dark on <html>. */
 .light {
   --background: 0 0% 100%;
   --foreground: 220 14% 10%;
