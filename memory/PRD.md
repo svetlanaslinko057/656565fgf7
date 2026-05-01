@@ -1,71 +1,95 @@
-# ATLAS DevOS — Cloned & Deployed
+# ATLAS DevOS — Master Admin Integrations Layer
 
-Cloned from https://github.com/svetlanaslinko057/234dsdw23 (2026-05-01).
+## Recap (current state)
+Cloned from https://github.com/svetlanaslinko057/234dsdw23 → deployed (Expo + React Web + FastAPI + MongoDB).
 
-## Architecture
+## Master Admin · Integrations & Keys (NEW)
 
-The repo ships THREE coordinated codebases sharing one FastAPI backend and one MongoDB:
+A single web admin page (`/admin/system` → tab `Integrations`) controls every external integration the
+backend talks to. Saves are **hot-reloaded** — no redeploy, no restart.
 
-| Layer | Path | Tech | Served at |
-|-------|------|------|-----------|
-| **Mobile App** (Expo / React Native) | `/app/frontend/` | Expo SDK 54, React Native 0.81, expo-router 6 | `/` (port 3000 via Metro tunnel) |
-| **Web Platform** (React CRA) | `/app/web/` | CRA 5 + craco, Tailwind, Radix UI, React Router 7 | `/api/web-ui/` (FastAPI serves static build) |
-| **Backend** (FastAPI) | `/app/backend/` | FastAPI + Socket.IO + Motor (MongoDB) + emergentintegrations | port 8001 (`/api/*` via ingress) |
+### What is admin-configurable
 
-## Web (React) — User Surfaces
+| Block | Stored at | Hot-reloaded by | Public field exposed |
+|-------|-----------|-----------------|----------------------|
+| **Email** (Resend) | `system_config.integrations_settings.email` | `email_service.set_runtime_config()` | — |
+| **Google Auth** | `…integrations_settings.google_auth` | `google_auth._resolve_google_client_id()` per-request | `client_id` |
+| **WayForPay** | `…integrations_settings.wayforpay` | `payment_providers.get_provider()` per-payment | `enabled` flag |
+| **Stripe** | `…integrations_settings.stripe` | `payment_providers.get_provider()` per-payment | `publishable_key`, `currency` |
+| **App** (preview URL + active provider) | `…integrations_settings.app` | callbacks pull live each request | `preview_url`, `active_payment_provider` |
+| **LLM** (existing) | `system_config.llm_settings` | `admin_llm_settings.get_active_llm_key()` | — |
 
-3 distinct UIs inside one bundle (React Router):
+### Backend wiring
 
-- **Client cabinet** (`/client/...`) — order projects, see deliverables, billing, contracts, transparency layer
-- **Developer cabinet** (`/developer/...`) — marketplace, accepted modules, time tracking, earnings, leaderboard
-- **Admin** (`/admin/...` and `/admin-v2/...`) — Dashboard, Workflow, QA, Finance, Team, System, Profile, Inbox, War Room, Templates, Withdrawals, Earnings Control
+* `/app/backend/admin_integrations.py` — single module with `get_setting()` helper, `set_setting()`, masked view, and the FastAPI router (5 PUT endpoints + 4 test endpoints + 1 public config endpoint).
+* `/app/backend/payment_providers/stripe_provider.py` — Stripe wrapper using `emergentintegrations.payments.stripe.checkout.StripeCheckout` (per Emergent Stripe playbook). Conforms to `BasePaymentProvider` — same `create_payment` / `verify_callback` shape as WayForPay/Mock.
+* `/app/backend/payment_providers/__init__.py` — `get_provider(db)` is now async, reads admin DB to pick provider (auto / stripe / wayforpay / mock).
+* `/app/backend/email_service.py` — added `set_runtime_config()` for hot-reload.
+* `/app/backend/google_auth.py` — `_resolve_google_client_id()` lazy-lookup (DB → env → fallback).
+* `/app/backend/server.py` — mounts the new router, seeds defaults on startup, adds `/api/webhook/stripe` + `/api/payments/stripe/status/{session_id}`, updates `_provider_create_payment` to use admin URL + async provider.
 
-90+ pages in `web/src/pages/`. Auth: cookie-based against `/api/auth/*`.
+### Endpoints (admin-only unless noted)
 
-## Mobile (Expo) — Pulse Surface
+```
+GET    /api/admin/settings/integrations                 → masked view of all blocks
+PUT    /api/admin/settings/integrations/email           → update Resend config
+PUT    /api/admin/settings/integrations/google_auth     → update Google OAuth config
+PUT    /api/admin/settings/integrations/wayforpay       → update WFP creds
+PUT    /api/admin/settings/integrations/stripe          → update Stripe keys
+PUT    /api/admin/settings/integrations/app             → update preview_url + active_payment_provider
+POST   /api/admin/settings/integrations/email/test      → send a one-off test email
+POST   /api/admin/settings/integrations/stripe/test     → live verify against Stripe API
+POST   /api/admin/settings/integrations/wayforpay/test  → cred-shape verify
+POST   /api/admin/settings/integrations/google_auth/test → format verify
 
-`/app/frontend/app/` (file-based routing):
-- `welcome`, `auth`, `gateway`, `index`, `hub`, `inbox`, `profile`, `settings`, `chat`, `activity`
-- Role nests: `admin/`, `client/`, `developer/`, `lead/`, `operator/`, `project/`, `workspace/`
+GET    /api/config/public                  → PUBLIC (no auth) — used by all frontends
+                                              { stripe.{enabled, publishable_key, currency},
+                                                google.{enabled, client_id},
+                                                wayforpay.{enabled},
+                                                app.{preview_url, active_payment_provider} }
 
-The mobile app is the "remote control" — web is the brain.
+POST   /api/webhook/stripe                 → Stripe → backend webhook
+GET    /api/payments/stripe/status/{sid}   → poll session status (UI fallback for webhook)
+```
 
-## Backend Subsystems (high level)
+### Web Admin UI
 
-`assignment_engine`, `acceptance_layer`, `time_tracking_layer`, `event_engine`, `decomposition_engine`, `pricing_engine`, `qa_layer`, `escrow_layer`, `earnings_layer`, `decision_layer`, `intelligence_layer`, `module_motion`, `operator_engine`, `auto_guardian`, `team_balancer`, `reputation_decay`, `system_truth`, `client_workspace`, `developer_brain`, `revenue_brain`, `payment_providers/` (WayForPay + Mock), Socket.IO real-time bus, sentence-transformers semantic matching.
+`/app/web/src/pages/AdminIntegrationsPage.js` — full rewrite. Sections (top → bottom):
+1. **App URL & Active Payment Provider** — pin the dynamic Emergent preview URL, force-pick provider
+2. **Email · Resend** — API key + from email/name + live "send test email" tool
+3. **Google Sign-In** — Client ID (public) + Client Secret + format validator
+4. **Stripe** — Publishable / Secret / Restricted / Webhook secret + currency + live `Account.retrieve()` test
+5. **WayForPay** — merchant_account / domain / secret_key / merchant_password / currency
+6. **LLM** — preserved existing OpenAI / Emergent flow
 
-Background loops: GUARDIAN (120s), MODULE MOTION (15s), OPERATOR SCHEDULER (300s), EVENT ENGINE (15min).
+Every secret field has Show/Hide toggle. Empty input means "keep current". Status pills show
+masked fingerprint or "Not configured".
 
-## Seeded data (auto on startup)
+### Seeded test credentials (from user, May 2026)
 
-- Admin user
-- Quick-access users: `admin@atlas.dev`, `john@atlas.dev` (developer), `client@atlas.dev`, `multi@atlas.dev` (developer)
-- Demo project "Acme Analytics Platform" with 3 modules
-- Mock seed: 2 projects, 7 modules, 6 earnings, 6 invoices, 2 deliverables, 3 tickets, 3 notifications
-- 4 scope templates, system_config, mock providers, portfolio cases
+| Provider | Field | Value |
+|----------|-------|-------|
+| WayForPay | merchant_account | `y_store_in_ua` |
+| WayForPay | secret_key | `4f27e43c…` |
+| WayForPay | merchant_password | `a6fcf5fe…` |
+| Stripe | publishable_key | `pk_test_51TP0RO…` |
+| Stripe | secret_key | `sk_test_51TP0RO…` |
+| Stripe | restricted_key | `rk_test_51TP0RO…` |
 
-## Deployment Notes
+Stripe live test verified against `acct_1TP0ROBXF2ZAbV1V` (BG, EUR) — `Account.retrieve()` returns 200.
 
-1. `requirements.txt` pulled in `sentence-transformers` → torch + CUDA libs (>5 GB). Replaced with **CPU-only torch 2.4.0** to fit the 10 GB `/app` quota.
-2. Added missing `resend` Python package (used by `email_service.py`; runs in disabled mode unless `RESEND_API_KEY` is set).
-3. `web/.env` created with `REACT_APP_BACKEND_URL=` (empty = same-origin, since web is served by FastAPI under `/api/web-ui/`) and `PUBLIC_URL=/api/web-ui` so React Router's `basename` works.
-4. Web build: `cd /app/web && yarn build` → `/app/web/build/` → FastAPI auto-serves it.
-5. Supervisor managed: `backend`, `expo`, `mongodb`. Web is static — no extra service.
+### Pending input from user
 
-## MOCKED integrations (disabled until keys provided)
+* **Google OAuth Client ID + Secret** — user said they will provide
+* **Resend API key** + verified `from` address — user has not provided
+* **Stripe webhook signing secret** (`whsec_…`) — generated in Stripe dashboard after registering `/api/webhook/stripe` endpoint
 
-- **Email** (Resend) — disabled, OTPs print to backend log instead
-- **Cloudinary** — MOCK mode, files saved locally
-- **WayForPay** — falls back to mock provider until `WAYFORPAY_*` env keys are set
-- **Stripe** — `stripe==15.0.1` installed, used by `payment_providers` if `STRIPE_*` keys are set
-- **Google OAuth** — `google_auth.py` exists but inactive without keys
-- **HuggingFace** — sentence-transformers downloads `all-MiniLM-L6-v2` on first boot (no auth needed, but `HF_TOKEN` would speed it up)
+### Frontend integration
 
-## Smart Enhancement Opportunity
+Web + Expo frontends should boot with a `GET /api/config/public` call to hydrate:
+* `Stripe.js` with `stripe.publishable_key`
+* `@react-oauth/google` (web) / `expo-auth-session` (mobile) with `google.client_id`
+* `app.preview_url` for all redirect-back-from-payment URLs
 
-The system already has a "Pressure View / System Actions Feed / Risk Signals" architecture in place
-(`system-actions-feed.tsx`, `system-balance.tsx`, `dev-opportunities-pressure.tsx`,
-`hidden_ranking.py`, `auto_guardian.py`). Next iteration: surface these signals on the admin
-dashboard as a single "System Visibility Layer" widget (top 3 overloaded devs, last 5 system
-adjustments, current risks) — turns the smart engine into a *visible* control panel and improves
-operator retention / paid-tier conversion.
+(Frontend wiring of these dynamic values will be done in the next iteration; the backend layer
+that *delivers* them is in place and tested.)

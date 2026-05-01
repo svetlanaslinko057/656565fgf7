@@ -44,13 +44,36 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 
-# Hardcoded fallback: Google Client ID is PUBLIC info (exposed to browsers anyway).
-# Kept here so redeploys never lose it even if env is wiped.
+# Default Google Client ID — only used as a last-resort fallback when neither
+# admin DB nor env var has a value. Replace via /admin/integrations.
 _DEFAULT_GOOGLE_CLIENT_ID = "539552820560-pso3qndegrntp46oneml9nr33t7rpi9j.apps.googleusercontent.com"
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip() or _DEFAULT_GOOGLE_CLIENT_ID
+
 # Small clock-skew tolerance so a 2-3 s drift between pod and Google
 # doesn't randomly 401 users.
 CLOCK_SKEW_SECONDS = 10
+
+
+async def _resolve_google_client_id() -> str:
+    """Resolve the *current* Google OAuth Client ID.
+
+    Order: admin DB (system_config.integrations_settings.google_auth.client_id)
+           → env GOOGLE_CLIENT_ID → hardcoded default.
+    """
+    try:
+        from admin_integrations import get_setting
+        cfg = await get_setting("google_auth")
+        cid = (cfg.get("client_id") or "").strip()
+        if cid:
+            return cid
+    except Exception:
+        pass
+    return os.environ.get("GOOGLE_CLIENT_ID", "").strip() or _DEFAULT_GOOGLE_CLIENT_ID
+
+
+# Compatibility export — code that read GOOGLE_CLIENT_ID at import-time still
+# works, but the value is overwritten lazily on every request via the resolver
+# above. Treat this as a fallback only.
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip() or _DEFAULT_GOOGLE_CLIENT_ID
 
 
 class GoogleCredentialBody(BaseModel):
@@ -70,11 +93,11 @@ def init_router(db, get_current_user_dep):
     @router.get("/google/config")
     async def google_config():
         """Expose the public Client ID so the frontends don't need to
-        hardcode it. Returns `{ enabled: false }` if env var is missing —
-        lets the UI hide the button cleanly in dev."""
+        hardcode it. Pulls live from admin DB → env → default."""
+        cid = await _resolve_google_client_id()
         return {
-            "enabled": bool(GOOGLE_CLIENT_ID),
-            "client_id": GOOGLE_CLIENT_ID or None,
+            "enabled": bool(cid),
+            "client_id": cid or None,
         }
 
     @router.post("/google")
@@ -83,7 +106,8 @@ def init_router(db, get_current_user_dep):
         request: Request,
         response: Response,
     ):
-        if not GOOGLE_CLIENT_ID:
+        client_id = await _resolve_google_client_id()
+        if not client_id:
             raise HTTPException(
                 status_code=503,
                 detail="Google Sign-In is not configured on the server",
@@ -94,17 +118,14 @@ def init_router(db, get_current_user_dep):
             raise HTTPException(status_code=400, detail="Missing Google ID token")
 
         # 1. Verify the token signature + audience with Google directly.
-        #    `verify_oauth2_token` hits https://www.googleapis.com/oauth2/v3/certs
-        #    (cached by the transport) and checks signature, exp, and aud.
         try:
             claims = google_id_token.verify_oauth2_token(
                 token,
                 google_requests.Request(),
-                GOOGLE_CLIENT_ID,
+                client_id,
                 clock_skew_in_seconds=CLOCK_SKEW_SECONDS,
             )
         except ValueError as e:
-            # Invalid signature, wrong aud, expired, or malformed JWT.
             raise HTTPException(status_code=401, detail=f"Google token invalid: {e}")
 
         # 2. Extract identity. Google guarantees `sub` is stable per user

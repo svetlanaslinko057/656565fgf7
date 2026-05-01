@@ -92,12 +92,22 @@ from payment_providers import get_provider as _get_payment_provider  # noqa: E40
 
 async def _provider_create_payment(invoice_doc: dict, return_url: Optional[str] = None) -> dict:
     """Create a real hosted payment for the invoice via the configured
-    provider (WayForPay in prod, Mock in dev). Persists payment_url +
-    provider + provider_order_id on the invoice. Returns the same dict.
+    provider (admin chooses Stripe/WayForPay/Mock from /admin/integrations,
+    or 'auto' for smart pick). Persists payment_url + provider +
+    provider_order_id on the invoice. Returns the same dict.
     Raises on failure so callers surface a 502 instead of mock-trapping."""
-    provider = _get_payment_provider()
-    backend_url = os.environ.get("BACKEND_URL", "")
-    ret = return_url or f"{backend_url}/api/web-ui/client/billing"
+    provider = await _get_payment_provider(db)
+    # Resolve return URL: caller > admin app.preview_url > BACKEND_URL env
+    base = ""
+    try:
+        from admin_integrations import get_setting as _ai_get_setting
+        app_cfg = await _ai_get_setting("app")
+        base = (app_cfg.get("preview_url") or "").rstrip("/")
+    except Exception:
+        pass
+    if not base:
+        base = (os.environ.get("BACKEND_URL") or "").rstrip("/")
+    ret = return_url or f"{base}/api/web-ui/client/billing"
     result = await provider.create_payment(invoice_doc, return_url=ret)
     if not result.success:
         raise HTTPException(status_code=502, detail=f"payment_provider_error: {result.error}")
@@ -22895,6 +22905,135 @@ import admin_llm_settings as _admin_llm  # noqa: E402
 fastapi_app.include_router(
     _admin_llm.init_router(db, require_role("admin"))
 )
+
+# Master Admin Integrations — UI-configurable Resend / Google Auth / WayForPay /
+# Stripe / preview URL. Keys stored in MongoDB `system_config.integrations_settings`;
+# admin can rotate from /admin/integrations without restart.
+import admin_integrations as _admin_integ  # noqa: E402
+fastapi_app.include_router(
+    _admin_integ.init_router(db, require_role("admin"))
+)
+
+
+@fastapi_app.on_event("startup")
+async def _bootstrap_integrations():
+    """Seed default integration keys (user-provided test creds for WFP/Stripe)
+    and push the saved Resend config into the live email_service module."""
+    try:
+        await _admin_integ.seed_defaults_if_empty(db)
+    except Exception as e:
+        logger.warning(f"INTEGRATIONS seed skipped: {e}")
+    try:
+        cfg = await _admin_integ.get_setting("email")
+        if cfg:
+            import email_service as _es
+            _es.set_runtime_config(cfg)
+    except Exception as e:
+        logger.warning(f"email_service hot-config skipped: {e}")
+
+
+# ---------- Stripe webhook + polling endpoints (admin-keyed) ----------
+@fastapi_app.post("/api/webhook/stripe", include_in_schema=False)
+async def stripe_webhook(request: Request):
+    """Stripe → backend webhook. Verifies signature using the secret from
+    /admin/integrations and updates the matching invoice + payment_transactions
+    row to `paid`."""
+    cfg = await _admin_integ.get_setting("stripe")
+    secret = (cfg.get("secret_key") or "").strip()
+    if not secret:
+        return {"ok": False, "error": "stripe_not_configured"}
+    body_bytes = await request.body()
+    sig = request.headers.get("Stripe-Signature") or request.headers.get("stripe-signature") or ""
+    try:
+        from emergentintegrations.payments.stripe.checkout import StripeCheckout
+        host_url = str(request.base_url)
+        webhook_url = f"{host_url}api/webhook/stripe"
+        sc = StripeCheckout(api_key=secret, webhook_url=webhook_url)
+        ev = await sc.handle_webhook(body_bytes, sig)
+    except Exception as e:
+        logger.exception("STRIPE webhook verify failed")
+        raise HTTPException(status_code=400, detail=f"stripe_webhook_invalid: {e}")
+
+    invoice_id = (ev.metadata or {}).get("invoice_id") if hasattr(ev, "metadata") else None
+    session_id = getattr(ev, "session_id", None)
+    payment_status = getattr(ev, "payment_status", "unknown")
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Idempotent transaction record
+    await db.payment_transactions.update_one(
+        {"session_id": session_id},
+        {"$set": {
+            "session_id": session_id,
+            "invoice_id": invoice_id,
+            "provider": "stripe",
+            "payment_status": payment_status,
+            "event_type": getattr(ev, "event_type", None),
+            "raw_event_id": getattr(ev, "event_id", None),
+            "updated_at": now_iso,
+        }, "$setOnInsert": {"created_at": now_iso}},
+        upsert=True,
+    )
+
+    if invoice_id and payment_status == "paid":
+        await db.invoices.update_one(
+            {"invoice_id": invoice_id, "status": {"$ne": "paid"}},
+            {"$set": {"status": "paid", "paid_at": now_iso, "updated_at": now_iso}},
+        )
+        try:
+            await realtime.emit_to_role("admin", "billing.paid", {"invoice_id": invoice_id, "provider": "stripe"})
+        except Exception:
+            pass
+
+    return {"ok": True, "received": True, "session_id": session_id, "payment_status": payment_status}
+
+
+@fastapi_app.get("/api/payments/stripe/status/{session_id}")
+async def stripe_status(session_id: str, request: Request):
+    """Frontend polls this after the user returns from Stripe. Returns the
+    *current* payment_status from Stripe so the UI can advance once paid."""
+    cfg = await _admin_integ.get_setting("stripe")
+    secret = (cfg.get("secret_key") or "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="stripe_not_configured")
+    try:
+        from emergentintegrations.payments.stripe.checkout import StripeCheckout
+        host_url = str(request.base_url)
+        webhook_url = f"{host_url}api/webhook/stripe"
+        sc = StripeCheckout(api_key=secret, webhook_url=webhook_url)
+        st = await sc.get_checkout_status(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"stripe_status_error: {e}")
+
+    invoice_id = (st.metadata or {}).get("invoice_id")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.payment_transactions.update_one(
+        {"session_id": session_id},
+        {"$set": {
+            "session_id": session_id,
+            "invoice_id": invoice_id,
+            "provider": "stripe",
+            "status": st.status,
+            "payment_status": st.payment_status,
+            "amount_total": st.amount_total,
+            "currency": st.currency,
+            "updated_at": now_iso,
+        }, "$setOnInsert": {"created_at": now_iso}},
+        upsert=True,
+    )
+    if invoice_id and st.payment_status == "paid":
+        await db.invoices.update_one(
+            {"invoice_id": invoice_id, "status": {"$ne": "paid"}},
+            {"$set": {"status": "paid", "paid_at": now_iso, "updated_at": now_iso}},
+        )
+
+    return {
+        "session_id": session_id,
+        "status": st.status,
+        "payment_status": st.payment_status,
+        "amount_total": st.amount_total,
+        "currency": st.currency,
+        "invoice_id": invoice_id,
+    }
 
 # Block 10.0 — Developer Work Hub (aggregator for /dev/work)
 import dev_work as _dev_work  # noqa: E402

@@ -1,9 +1,12 @@
 """
-Resend email delivery — single point for all transactional mail.
+Resend email delivery — admin-configurable runtime config.
+
+Reads RESEND_API_KEY from env on import, but admin can override at runtime
+via `set_runtime_config()` — every send_otp_email call uses the current
+config. No restart required after rotating keys in /admin/integrations.
 
 Synchronous Resend SDK is wrapped in `asyncio.to_thread` to keep the FastAPI
-event loop responsive. Helpers raise on hard errors so callers can decide
-between fail-open (log + fallback) and fail-closed (deny the action).
+event loop responsive.
 """
 from __future__ import annotations
 
@@ -16,26 +19,47 @@ import resend
 
 logger = logging.getLogger("email_service")
 
-# One-shot configuration. Reads env at import time; restart the process
-# after rotating keys.
-_API_KEY = os.environ.get("RESEND_API_KEY", "")
-_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev")
-_FROM_NAME = os.environ.get("RESEND_FROM_NAME", "EVA-X")
-_FROM = f"{_FROM_NAME} <{_FROM_EMAIL}>" if _FROM_NAME else _FROM_EMAIL
+# Mutable runtime config. Initial values from env, overridden by admin UI
+# via set_runtime_config() (called from admin_integrations.py on PUT).
+_RUNTIME = {
+    "api_key": os.environ.get("RESEND_API_KEY", ""),
+    "from_email": os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev"),
+    "from_name": os.environ.get("RESEND_FROM_NAME", "EVA-X"),
+}
 
-if _API_KEY:
-    resend.api_key = _API_KEY
+if _RUNTIME["api_key"]:
+    resend.api_key = _RUNTIME["api_key"]
 else:
     logger.warning("RESEND_API_KEY not set — email delivery disabled")
 
 
+def set_runtime_config(cfg: dict) -> None:
+    """Replace runtime email config. Called by admin_integrations on save."""
+    api_key = (cfg.get("api_key") or "").strip()
+    from_email = (cfg.get("from_email") or _RUNTIME["from_email"]).strip()
+    from_name = (cfg.get("from_name") or _RUNTIME["from_name"]).strip()
+    _RUNTIME["api_key"] = api_key
+    _RUNTIME["from_email"] = from_email
+    _RUNTIME["from_name"] = from_name
+    if api_key:
+        resend.api_key = api_key
+        logger.info(f"RESEND runtime config updated: from={from_name} <{from_email}>")
+    else:
+        logger.warning("RESEND runtime config cleared — email delivery disabled")
+
+
 def is_configured() -> bool:
-    return bool(_API_KEY)
+    return bool(_RUNTIME["api_key"])
+
+
+def _from_address() -> str:
+    fe = _RUNTIME["from_email"]
+    fn = _RUNTIME["from_name"]
+    return f"{fn} <{fe}>" if fn else fe
 
 
 # ---------------------------------------------------------------- OTP email
 def _otp_html(code: str, ttl_minutes: int = 10) -> str:
-    # Inline CSS only. No external assets. Tested in Gmail / Apple Mail.
     return f"""
 <!DOCTYPE html>
 <html>
@@ -70,16 +94,12 @@ def _otp_html(code: str, ttl_minutes: int = 10) -> str:
 
 
 async def send_otp_email(email: str, code: str, ttl_minutes: int = 10) -> Optional[str]:
-    """Deliver a 6-digit code via Resend.
-
-    Returns the Resend message id on success. Raises on transport / API errors;
-    callers decide whether to surface the error or fall back to logging.
-    """
+    """Deliver a 6-digit code via Resend (current runtime config)."""
     if not is_configured():
         raise RuntimeError("RESEND_API_KEY not configured")
 
     params = {
-        "from": _FROM,
+        "from": _from_address(),
         "to": [email],
         "subject": f"Your EVA-X code is {code}",
         "html": _otp_html(code, ttl_minutes),
@@ -91,6 +111,5 @@ async def send_otp_email(email: str, code: str, ttl_minutes: int = 10) -> Option
         logger.info(f"RESEND OTP sent → {email} id={msg_id}")
         return msg_id
     except Exception as e:
-        # Don't leak stack to clients; log full server-side, raise opaque.
         logger.exception(f"RESEND OTP failed → {email}: {e}")
         raise
