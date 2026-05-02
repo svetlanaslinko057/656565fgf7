@@ -81,8 +81,12 @@ const ClientAuthPage = () => {
     try {
       const res = await axios.post(`${API}/auth/demo`, { role: 'client' }, { withCredentials: true });
       if (res.data) {
-        // Force full page reload to ensure auth state is updated
-        window.location.href = '/client/dashboard';
+        // Force full page reload so AuthContext re-fetches /me with the
+        // freshly-set session cookie. Use PUBLIC_URL ('/api/web-ui') so we
+        // stay inside the React SPA — bare '/client/dashboard' goes to the
+        // Expo mobile app which doesn't have this route.
+        const base = process.env.PUBLIC_URL || '/api/web-ui';
+        window.location.href = `${base}/client/dashboard`;
       }
     } catch (err) {
       console.error('Demo login error:', err);
@@ -110,7 +114,8 @@ const ClientAuthPage = () => {
       );
       await bindReferral();
       // Full reload = AuthProvider picks up the fresh session cookie.
-      window.location.href = '/client/dashboard';
+      const base = process.env.PUBLIC_URL || '/api/web-ui';
+      window.location.href = `${base}/client/dashboard`;
     } catch (err) {
       setError(err.response?.data?.detail || err.message || 'Google sign-in failed');
       setLoading(false);

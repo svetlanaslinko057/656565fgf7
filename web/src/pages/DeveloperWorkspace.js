@@ -125,7 +125,7 @@ const DeveloperWorkspace = () => {
               <Monitor className="w-12 h-12 text-white/30 mx-auto mb-3" />
               <p className="text-muted-foreground mb-4">No active modules</p>
               <Button
-                onClick={() => window.location.href = '/developer/marketplace'}
+                onClick={() => { const base = process.env.PUBLIC_URL || '/api/web-ui'; window.location.href = `${base}/developer/marketplace`; }}
                 className="bg-white text-black hover:bg-white/90"
               >
                 Browse Marketplace

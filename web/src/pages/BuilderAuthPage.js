@@ -78,7 +78,10 @@ const BuilderAuthPage = () => {
     setLoading(true);
     try {
       await axios.post(`${API}/auth/demo`, { role: 'developer' }, { withCredentials: true });
-      window.location.href = '/developer/dashboard';
+      // Stay inside the React SPA (served under PUBLIC_URL=/api/web-ui).
+      // A bare '/developer/dashboard' would route to the Expo app, not us.
+      const base = process.env.PUBLIC_URL || '/api/web-ui';
+      window.location.href = `${base}/developer/dashboard`;
     } catch (err) {
       setError('Demo access failed');
     } finally {
