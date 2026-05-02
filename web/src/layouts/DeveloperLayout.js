@@ -2,7 +2,6 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/App';
 import { ConnectionStatusBadge } from '@/components/ConnectionStatus';
 import NotificationBell from '@/components/NotificationBell';
-import ThemeToggle from '@/components/ThemeToggle';
 import { Home, DollarSign, LogOut, User, Trophy, Monitor, ShoppingCart, Inbox } from 'lucide-react';
 
 const DeveloperLayout = () => {
@@ -27,7 +26,6 @@ const DeveloperLayout = () => {
           <div className="mt-2 flex items-center gap-2">
             <ConnectionStatusBadge />
             <NotificationBell />
-            <ThemeToggle />
           </div>
         </div>
 

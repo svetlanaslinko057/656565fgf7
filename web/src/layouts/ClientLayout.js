@@ -3,7 +3,6 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/App';
 import { ConnectionStatusBadge } from '@/components/ConnectionStatus';
 import NotificationBell from '@/components/NotificationBell';
-import ThemeToggle from '@/components/ThemeToggle';
 import { Home, Folder, Bell, LogOut, Settings, ChevronRight, Gift, Trophy, Activity } from 'lucide-react';
 
 const ClientLayout = () => {
@@ -28,7 +27,6 @@ const ClientLayout = () => {
           <div className="mt-2 flex items-center gap-2">
             <ConnectionStatusBadge />
             <NotificationBell />
-            <ThemeToggle />
           </div>
         </div>
 
